@@ -4,6 +4,11 @@ storage:none
 nuget FSharp.Core redirects: force
 nuget Fable.JsonConverter
 nuget Suave
+nuget Giraffe
+nuget Microsoft.AspNetCore.Hosting
+nuget Microsoft.AspNetCore.Server.Kestrel
+nuget Microsoft.AspNetCore.Server.IISIntegration
+nuget Microsoft.AspNetCore.StaticFiles
 nuget Microsoft.Extensions.Logging.Console
 nuget System.Net.NetworkInformation
 nuget Newtonsoft.Json

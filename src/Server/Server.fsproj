@@ -16,6 +16,8 @@
     <Compile Include="Storage/AzureTable.fs" />
     <Compile Include="Storage/WebJobs.fs" />
     <Compile Include="Database.fs" />
+    <Compile Include="WebServer/Suave.fs" />
+    <Compile Include="WebServer/Giraffe.fs" />
     <Compile Include="WebServer.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>

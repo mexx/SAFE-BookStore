@@ -1,5 +1,10 @@
 FSharp.Core
 Suave
+Giraffe
+Microsoft.AspNetCore.Hosting
+Microsoft.AspNetCore.Server.Kestrel
+Microsoft.AspNetCore.Server.IISIntegration
+Microsoft.AspNetCore.StaticFiles
 Microsoft.Extensions.Logging.Console
 System.Net.NetworkInformation
 Newtonsoft.Json

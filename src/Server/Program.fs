@@ -42,7 +42,7 @@ let main args =
             |> Option.defaultValue Database.DatabaseType.FileSystem
 
         let port = getPortsOrDefault 8085us
-        WebServer.start database clientPath port
+        WebServer.start WebServer.WebServerType.Giraffe database clientPath port
         0
     with
     | exn ->
