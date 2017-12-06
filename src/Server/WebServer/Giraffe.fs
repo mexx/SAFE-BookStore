@@ -6,77 +6,86 @@ open Giraffe
 open ServerCode
 open ServerCode.Domain
 
+open System.Threading.Tasks
+
+let perform (effect : Async<_>) f =
+    fun (next : HttpFunc) (ctx : HttpContext) -> task {
+        let! data = effect
+        return! f data next ctx
+    }
+
+let sideEffect effect =
+    perform effect (fun () -> id)
+
+let fromCtx (accessor: _ -> Task<'T>) f =
+    fun (next : HttpFunc) (ctx : HttpContext) -> task {
+        let! data = accessor ctx
+        return! f data next ctx
+    }
+
+let fromTextBody =
+    fromCtx (fun ctx -> ctx.ReadBodyFromRequestAsync())
+
+let fromJsonBody f =
+    FableJson.ofJson<'T> >> f
+    |> fromTextBody
+
 /// Login web part and functions for API web part request authorisation with JWT.
 module Auth =
 
     /// Login web part that authenticates a user and returns a token in the HTTP body.
     let login =
-        fun (next : HttpFunc) (ctx : HttpContext) -> task {
-            let! body = ctx.ReadBodyFromRequestAsync()
-            let login = body |> FableJson.ofJson<Domain.Login>
-
-            try
-                match Auth.login login with
-                | Ok token -> return! Successful.ok (setBodyAsString token) next ctx
-                | Error message -> return! failwith message
-            with
-            | _ -> return! RequestErrors.UNAUTHORIZED "Bearer" "localhost" (sprintf "User '%s' can't be logged in." login.UserName) next ctx
-        }
+        fun login -> 
+            match Auth.login login with
+            | Ok token ->
+                Successful.ok (setBodyAsString token)
+            | Error _ ->
+                RequestErrors.UNAUTHORIZED "Bearer" "localhost" (sprintf "User '%s' can't be logged in." login.UserName)
+        |> fromJsonBody
 
     /// Invokes a function that produces the output for a web part if the HttpContext
     /// contains a valid auth token. Use to authorise the expressions in your web part
     /// code (e.g. WishList.getWishList).
     let useToken f =
-        fun (next : HttpFunc) (ctx : HttpContext) -> task {
-            match ctx.TryGetRequestHeader "Authorization" with
-            | Some accesstoken when accesstoken.StartsWith "Bearer " ->
-                let jwt = accesstoken.Replace("Bearer ","")
-                match Auth.validate jwt with
-                | None -> return! RequestErrors.FORBIDDEN "Accessing this API is not allowed" next ctx
-                | Some token -> return! f token next ctx
-            | _ -> return! RequestErrors.BAD_REQUEST "Request doesn't contain a JSON Web Token" next ctx
-        }
+        function
+        | Some (accesstoken: string) when accesstoken.StartsWith "Bearer " ->
+            let jwt = accesstoken.Replace("Bearer ","")
+            match Auth.validate jwt with
+            | None -> RequestErrors.FORBIDDEN "Accessing this API is not allowed"
+            | Some token -> f token
+        | _ -> RequestErrors.BAD_REQUEST "Request doesn't contain a JSON Web Token"
+        |> fromCtx (fun ctx -> System.Threading.Tasks.Task.FromResult <| ctx.TryGetRequestHeader "Authorization")
 
 /// Wish list API web parts and data access functions.
 module WishList =
 
     /// Handle the GET on /api/wishlist
     let getWishList (getWishListFromDB : _ -> Async<_>) =
-        Auth.useToken (fun token (next : HttpFunc) (ctx : HttpContext) -> task {
-            try
-                let! wishList = getWishListFromDB token.UserName
-                return! Successful.ok (setBodyAsString <| FableJson.toJson wishList) next ctx
-            with exn ->
-                // TODO: logger.error (eventX "SERVICE_UNAVAILABLE" >> addExn exn)
-                return! ServerErrors.SERVICE_UNAVAILABLE "Database not available" next ctx
-        })
+        Auth.useToken (fun token ->
+            perform (getWishListFromDB token.UserName) (
+                FableJson.toJson >> setBodyAsString >> Successful.ok
+            ))
 
     /// Handle the POST on /api/wishlist
     let postWishList (saveWishListToDB : _ -> Async<_>) =
-        Auth.useToken (fun token (next : HttpFunc) (ctx : HttpContext) -> task {
-            try
-                let! body = ctx.ReadBodyFromRequestAsync()
-                let wishList = body |> FableJson.ofJson<Domain.WishList>
-
+        Auth.useToken (fun token ->
+            fun wishList ->
                 if token.UserName <> wishList.UserName then
-                    return! RequestErrors.UNAUTHORIZED "Bearer" "localhost" (sprintf "WishList is not matching user %s" token.UserName) next ctx
+                    RequestErrors.UNAUTHORIZED "Bearer" "localhost" (sprintf "WishList is not matching user %s" token.UserName)
                 else
                     if Validation.verifyWishList wishList then
-                        do! saveWishListToDB wishList
-                        return! Successful.ok (setBodyAsString <| FableJson.toJson wishList) next ctx
+                        sideEffect (saveWishListToDB wishList)
+                        >=> Successful.ok (setBodyAsString <| FableJson.toJson wishList)
                     else
-                        return! RequestErrors.BAD_REQUEST "WishList is not valid" next ctx
-            with exn ->
-                // TODO: logger.error (eventX "SERVICE_UNAVAILABLE" >> addExn exn)
-                return! ServerErrors.SERVICE_UNAVAILABLE "Database not available" next ctx
-        })
+                        RequestErrors.BAD_REQUEST "WishList is not valid"
+            |> fromJsonBody
+        )
 
     /// Retrieve the last time the wish list was reset.
     let getResetTime (getLastResetTime : _ -> Async<_>) =
-        fun (next : HttpFunc) (ctx : HttpContext) -> task {
-            let! lastResetTime = getLastResetTime()
-            return! Successful.ok (setBodyAsString <| FableJson.toJson { Time = lastResetTime }) next ctx
-        }
+        perform (getLastResetTime()) (
+            fun lastResetTime ->
+                Successful.ok (setBodyAsString <| FableJson.toJson { Time = lastResetTime }))
 
 
 open System
